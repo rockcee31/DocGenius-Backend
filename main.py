@@ -10,7 +10,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from openai import OpenAI
-
+from qdrant_client import QdrantClient
 app = FastAPI()
 
 # CORS setup
@@ -25,6 +25,12 @@ app.add_middleware(
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+
+
+qdrant_client = QdrantClient(
+    url="https://qdrant-vector-db.onrender.com",
+    timeout=30
+)
 @app.post("/upload")
 async def upload_endpoint(file: UploadFile = File(...)):
     temp_filename = f"temp_{uuid.uuid4().hex}.pdf"
@@ -45,7 +51,7 @@ async def upload_endpoint(file: UploadFile = File(...)):
 
     vector_store = QdrantVectorStore.from_documents(
         documents=split_docs,
-        url="https://qdrant-vector-db.onrender.com",
+        client=qdrant_client,
         collection_name="learning_vectors",
         embedding=embedding_model
     )
@@ -63,7 +69,7 @@ async def chat(request: Request):
     embedding_model = OpenAIEmbeddings(model="text-embedding-3-large")
 
     vector_db = QdrantVectorStore.from_existing_collection(
-        url="https://qdrant-vector-db.onrender.com",
+        client=qdrant_client,
         collection_name="learning_vectors",
         embedding=embedding_model
     )
