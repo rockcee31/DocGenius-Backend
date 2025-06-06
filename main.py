@@ -36,11 +36,6 @@ qdrant_client = QdrantClient(
     url="https://qdrant-vector-db.onrender.com:6333",
     timeout=30
 )
-vector_db = QdrantVectorStore.from_existing_collection(
-    client=qdrant_client,
-    collection_name="learning_vectors",
-    embedding=embedding_model
-)
 
 @app.post("/upload")
 async def upload_endpoint(file: UploadFile = File(...)):
