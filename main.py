@@ -28,7 +28,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 qdrant_client = QdrantClient(
-    url="https://qdrant-vector-db.onrender.com",
+    url="https://qdrant-vector-db.onrender.com:6333",
     timeout=30
 )
 @app.post("/upload")
