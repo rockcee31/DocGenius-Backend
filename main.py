@@ -1,10 +1,11 @@
-from fastapi import FastAPI, UploadFile, File, Request
+from fastapi import FastAPI, UploadFile, File, Request,HTTPException
+
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from dotenv import load_dotenv
 import uuid
 import os
-
+import logging
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
@@ -69,43 +70,58 @@ async def upload_endpoint(file: UploadFile = File(...)):
 
 @app.post("/chat")
 async def chat(request: Request):
-    data = await request.json()
-    messages = data.get("messages")
+    try:
+        data = await request.json()
+        messages = data.get("messages")
+        if not messages:
+            raise HTTPException(status_code=400, detail="No messages provided")
 
-    embedding_model = OpenAIEmbeddings(model="text-embedding-3-large")
+        embedding_model = OpenAIEmbeddings(model="text-embedding-3-large")
 
-    vector_db = QdrantVectorStore.from_existing_collection(
-        client=qdrant_client,
-        collection_name="learning_vectors",
-        embedding=embedding_model
-    )
+        vector_db = QdrantVectorStore.from_existing_collection(
+            client=qdrant_client,
+            collection_name="learning_vectors",
+            embedding=embedding_model
+        )
 
-    query = messages[-1].get('content')
+        query = messages[-1].get('content')
+        if not query:
+            raise HTTPException(status_code=400, detail="Query content missing in last message")
 
-    search_results = vector_db.similarity_search(query=query)
+        search_results = vector_db.similarity_search(query=query)
 
-    context = "\n\n\n".join([
-        f"PageContent: {result.page_content}\nPage Number: {result.metadata['page_label']}\nFile Location: {result.metadata['source']}"
-        for result in search_results
-    ])
+        context = "\n\n\n".join([
+            f"PageContent: {result.page_content}\nPage Number: {result.metadata['page_label']}\nFile Location: {result.metadata['source']}"
+            for result in search_results
+        ])
 
-    SYSTEM_PROMPT = f"""
-        You are a helpful AI Assistant who answers user queries based on the available context retrieved from
-        PDF files along with page content and page number.
+        SYSTEM_PROMPT = f"""
+            You are a helpful AI Assistant who answers user queries based on the available context retrieved from
+            PDF files along with page content and page number.
 
-        You should only answer the user based on the following context and guide the user to open the correct page number for more info.
+            You should only answer the user based on the following context and guide the user to open the correct page number for more info.
 
-        Context:
-        {context}
-        """
+            Context:
+            {context}
+            """
 
-    messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
+        messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
 
-    chat_completion = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=messages
-    )
-    return {"answer": chat_completion.choices[0].message.content}
+        chat_completion = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages
+        )
+        return {"answer": chat_completion.choices[0].message.content}
+
+    except HTTPException as e:
+        # This is for known errors you explicitly raise
+        logging.error(f"HTTPException: {e.detail}")
+        raise e
+
+    except Exception as e:
+        # For unexpected errors
+        logging.error(f"Unexpected error in /chat: {e}", exc_info=True)
+        return {"error": "An error occurred while processing your request."}
 
 @app.get('/')
 async def root():
