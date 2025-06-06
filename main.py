@@ -88,12 +88,22 @@ async def chat(request: Request):
     try:
         data = await request.json()
         messages = data.get("messages")
+        collection_name = data.get("collection_name")  # must come from client!
+
         if not messages:
             raise HTTPException(status_code=400, detail="No messages provided")
+        if not collection_name:
+            raise HTTPException(status_code=400, detail="collection_name is required")
 
         query = messages[-1].get('content')
         if not query:
             raise HTTPException(status_code=400, detail="Query content missing in last message")
+
+        vector_db = QdrantVectorStore.from_existing_collection(
+            client=qdrant_client,
+            collection_name=collection_name,
+            embedding=embedding_model
+        )
 
         search_results = vector_db.similarity_search(query=query)
 
