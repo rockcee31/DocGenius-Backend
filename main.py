@@ -39,43 +39,40 @@ qdrant_client = QdrantClient(
 
 @app.post("/upload")
 async def upload_endpoint(file: UploadFile = File(...)):
-    print("received upload request")
-    
-    user_id = uuid.uuid4().hex  # unique ID per upload/user
+    user_id = uuid.uuid4().hex
     collection_name = f"learning_vectors_{user_id}"
     temp_filename = f"temp_{user_id}.pdf"
     
     try:
+        # Save the file locally
         with open(temp_filename, "wb") as f:
-            contents = await file.read()
-            f.write(contents)
+            f.write(await file.read())
 
+        # Load and split PDF
         loader = PyPDFLoader(file_path=temp_filename)
         docs = loader.load()
-
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=400)
         split_docs = text_splitter.split_documents(documents=docs)
 
-        vector_store = QdrantVectorStore.from_documents(
+        # Initialize vector store (do NOT return or store this object)
+        QdrantVectorStore.from_documents(
             documents=split_docs,
             client=qdrant_client,
-            collection_name=collection_name,  # use unique collection name here
+            collection_name=collection_name,
             embedding=embedding_model
         )
 
-        if vector_store:
-            # Return unique collection name to client
-            return {"status": "uploaded", "collection_name": collection_name}
-        else:
-            return {"status": "error", "message": "Vector store creation returned None"}
+        # ✅ Only return basic info
+        return {"status": "uploaded", "collection_name": collection_name}
 
     except Exception as e:
-        logging.error(f"Upload failed: {e}", exc_info=True)
-        return {"status": "error", "message": f"Upload processing failed: {e}"}
+        logging.exception("Upload failed")
+        return {"status": "error", "message": f"Upload processing failed: {str(e)}"}
 
     finally:
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
+
 
 # Chat Endpoint
 @app.post("/chat")
