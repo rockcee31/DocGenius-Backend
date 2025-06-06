@@ -1,5 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Request,HTTPException
-
+from fastapi import FastAPI, UploadFile, File, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from dotenv import load_dotenv
@@ -10,28 +9,40 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
-from openai import OpenAI
+import openai  # Updated
 from qdrant_client import QdrantClient
+
+# Load environment variables
+load_dotenv()
+
+# Initialize FastAPI app
 app = FastAPI()
 
 # CORS setup
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change this to your frontend URL(s) in production!
+    allow_origins=["*"],  # In production, restrict to your frontend domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Set OpenAI API key
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-
-
+# Initialize once — not inside routes
+embedding_model = OpenAIEmbeddings(model="text-embedding-3-large")
 qdrant_client = QdrantClient(
     url="https://qdrant-vector-db.onrender.com:6333",
     timeout=30
 )
+vector_db = QdrantVectorStore.from_existing_collection(
+    client=qdrant_client,
+    collection_name="learning_vectors",
+    embedding=embedding_model
+)
+
+# PDF Upload Endpoint
 @app.post("/upload")
 async def upload_endpoint(file: UploadFile = File(...)):
     print("received upload request")
@@ -47,8 +58,6 @@ async def upload_endpoint(file: UploadFile = File(...)):
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=400)
         split_docs = text_splitter.split_documents(documents=docs)
 
-        embedding_model = OpenAIEmbeddings(model="text-embedding-3-large")
-
         vector_store = QdrantVectorStore.from_documents(
             documents=split_docs,
             client=qdrant_client,
@@ -62,12 +71,14 @@ async def upload_endpoint(file: UploadFile = File(...)):
             return {"status": "error", "message": "Vector store creation returned None"}
 
     except Exception as e:
+        logging.error(f"Upload failed: {e}", exc_info=True)
         return {"status": "error", "message": f"Upload processing failed: {e}"}
 
     finally:
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
 
+# Chat Endpoint
 @app.post("/chat")
 async def chat(request: Request):
     try:
@@ -76,14 +87,6 @@ async def chat(request: Request):
         if not messages:
             raise HTTPException(status_code=400, detail="No messages provided")
 
-        embedding_model = OpenAIEmbeddings(model="text-embedding-3-large")
-
-        vector_db = QdrantVectorStore.from_existing_collection(
-            client=qdrant_client,
-            collection_name="learning_vectors",
-            embedding=embedding_model
-        )
-
         query = messages[-1].get('content')
         if not query:
             raise HTTPException(status_code=400, detail="Query content missing in last message")
@@ -91,42 +94,45 @@ async def chat(request: Request):
         search_results = vector_db.similarity_search(query=query)
 
         context = "\n\n\n".join([
-            f"PageContent: {result.page_content}\nPage Number: {result.metadata['page_label']}\nFile Location: {result.metadata['source']}"
+            f"PageContent: {result.page_content}\n"
+            f"Page Number: {result.metadata.get('page_label', 'N/A')}\n"
+            f"File Location: {result.metadata.get('source', 'Unknown')}"
             for result in search_results
         ])
 
         SYSTEM_PROMPT = f"""
-            You are a helpful AI Assistant who answers user queries based on the available context retrieved from
-            PDF files along with page content and page number.
+        You are a helpful AI Assistant who answers user queries based on the available context retrieved from
+        PDF files along with page content and page number.
 
-            You should only answer the user based on the following context and guide the user to open the correct page number for more info.
+        You should only answer the user based on the following context and guide the user to open the correct page number for more info.
 
-            Context:
-            {context}
-            """
+        Context:
+        {context}
+        """
 
         messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
 
-        chat_completion = client.chat.completions.create(
+        chat_completion = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=messages
         )
-        return {"answer": chat_completion.choices[0].message.content}
+
+        return {"answer": chat_completion.choices[0].message["content"]}
 
     except HTTPException as e:
-        # This is for known errors you explicitly raise
         logging.error(f"HTTPException: {e.detail}")
         raise e
 
     except Exception as e:
-        # For unexpected errors
         logging.error(f"Unexpected error in /chat: {e}", exc_info=True)
         return {"error": "An error occurred while processing your request."}
 
+# Root Endpoint
 @app.get('/')
 async def root():
     return {"message": "Hello chai code"}
 
+# App runner
 def main():
     print("Hello from backend!")
     port = int(os.getenv("PORT", 8000))
