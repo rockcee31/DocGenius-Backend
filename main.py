@@ -33,33 +33,39 @@ qdrant_client = QdrantClient(
 )
 @app.post("/upload")
 async def upload_endpoint(file: UploadFile = File(...)):
+    print("received upload request")
     temp_filename = f"temp_{uuid.uuid4().hex}.pdf"
-    with open(temp_filename, "wb") as f:
-        contents = await file.read()
-        f.write(contents)
+    try:
+        with open(temp_filename, "wb") as f:
+            contents = await file.read()
+            f.write(contents)
 
-    loader = PyPDFLoader(file_path=temp_filename)
-    docs = loader.load()
+        loader = PyPDFLoader(file_path=temp_filename)
+        docs = loader.load()
 
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=400
-    )
-    split_docs = text_splitter.split_documents(documents=docs)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=400)
+        split_docs = text_splitter.split_documents(documents=docs)
 
-    embedding_model = OpenAIEmbeddings(model="text-embedding-3-large")
+        embedding_model = OpenAIEmbeddings(model="text-embedding-3-large")
 
-    vector_store = QdrantVectorStore.from_documents(
-        documents=split_docs,
-        client=qdrant_client,
-        collection_name="learning_vectors",
-        embedding=embedding_model
-    )
+        vector_store = QdrantVectorStore.from_documents(
+            documents=split_docs,
+            client=qdrant_client,
+            collection_name="learning_vectors",
+            embedding=embedding_model
+        )
 
-    os.remove(temp_filename)
+        if vector_store:
+            return {"status": "uploaded"}
+        else:
+            return {"status": "error", "message": "Vector store creation returned None"}
 
-    if vector_store:
-        return {"status": "uploaded"}
+    except Exception as e:
+        return {"status": "error", "message": f"Upload processing failed: {e}"}
+
+    finally:
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
 
 @app.post("/chat")
 async def chat(request: Request):
