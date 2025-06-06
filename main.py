@@ -42,11 +42,14 @@ vector_db = QdrantVectorStore.from_existing_collection(
     embedding=embedding_model
 )
 
-# PDF Upload Endpoint
 @app.post("/upload")
 async def upload_endpoint(file: UploadFile = File(...)):
     print("received upload request")
-    temp_filename = f"temp_{uuid.uuid4().hex}.pdf"
+    
+    user_id = uuid.uuid4().hex  # unique ID per upload/user
+    collection_name = f"learning_vectors_{user_id}"
+    temp_filename = f"temp_{user_id}.pdf"
+    
     try:
         with open(temp_filename, "wb") as f:
             contents = await file.read()
@@ -61,12 +64,13 @@ async def upload_endpoint(file: UploadFile = File(...)):
         vector_store = QdrantVectorStore.from_documents(
             documents=split_docs,
             client=qdrant_client,
-            collection_name="learning_vectors",
+            collection_name=collection_name,  # use unique collection name here
             embedding=embedding_model
         )
 
         if vector_store:
-            return {"status": "uploaded"}
+            # Return unique collection name to client
+            return {"status": "uploaded", "collection_name": collection_name}
         else:
             return {"status": "error", "message": "Vector store creation returned None"}
 
